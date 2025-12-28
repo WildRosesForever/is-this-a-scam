@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Is this a scam?</title>
+</head>
+<body style="font-family:system-ui;max-width:900px;margin:24px auto;padding:0 12px;">
+
+  <h1>Is this a scam?</h1>
+  <p>Paste a message or letter. Get a calm risk assessment and what to do next.</p>
+
+  <textarea id="text" rows="10" style="width:100%;padding:12px;"
+    placeholder="Paste the message here..."></textarea>
+
+  <br/><br/>
+  <button id="go" style="padding:10px 14px;">Check</button>
+  <span id="status"></span>
+
+  <div id="result" style="display:none;margin-top:20px;border:1px solid #ddd;padding:16px;border-radius:10px;">
+    <h2>Result</h2>
+    <p><b>Likelihood:</b> <span id="likelihood"></span></p>
+    <p id="summary"></p>
+
+    <h3>Red flags</h3>
+    <div id="red_flags"></div>
+
+    <h3>What to do</h3>
+    <div id="what_to_do"></div>
+
+    <h3>Safe next steps</h3>
+    <div id="safe_next_steps"></div>
+  </div>
+
+  <script>
+    const ENDPOINT = "/api/check";
+    const $ = id => document.getElementById(id);
+
+    function bullets(text) {
+      if (!text) return "";
+      const lines = text.split("\n").filter(Boolean);
+      if (lines.some(l => l.startsWith("-"))) {
+        return "<ul>" + lines.map(l => "<li>" + l.replace(/^-\s*/, "") + "</li>").join("") + "</ul>";
+      }
+      return "<p>" + text + "</p>";
+    }
+
+    $("go").onclick = async () => {
+      const text = $("text").value;
+      $("status").textContent = "Checking…";
+      $("result").style.display = "none";
+
+      try {
+        const r = await fetch(ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text })
+        });
+        const j = await r.json();
+
+        if (!j.ok) {
+          $("status").textContent = "Error.";
+          return;
+        }
+
+        $("likelihood").textContent = j.data.likelihood;
+        $("summary").textContent = j.data.summary;
+        $("red_flags").innerHTML = bullets(j.data.red_flags);
+        $("what_to_do").innerHTML = bullets(j.data.what_to_do);
+        $("safe_next_steps").innerHTML = bullets(j.data.safe_next_steps);
+
+        $("result").style.display = "block";
+        $("status").textContent = "Done.";
+      } catch {
+        $("status").textContent = "Network error.";
+      }
+    };
+  </script>
+</body>
+</html>
