@@ -8,6 +8,24 @@ function setCors(res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+function extractJson(raw) {
+  if (!raw || typeof raw !== "string") return "";
+
+  let s = raw.trim();
+
+  // Remove ```json ... ``` or ``` ... ``` fences
+  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+  // If model added extra text, slice from first { to last }
+  const first = s.indexOf("{");
+  const last = s.lastIndexOf("}");
+  if (first !== -1 && last !== -1 && last > first) {
+    s = s.slice(first, last + 1);
+  }
+
+  return s.trim();
+}
+
 export default async function handler(req, res) {
   setCors(res);
 
@@ -15,33 +33,37 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
 
   try {
-    const { text } = req.body || {};
+    const { text, tone = "short" } = req.body || {};
     if (!text || typeof text !== "string") {
       return res.status(400).json({ error: "Missing text" });
     }
 
     const trimmed = text.trim();
-    if (trimmed.length < 30) {
-      return res.status(400).json({ error: "Text too short" });
-    }
+    if (trimmed.length < 30) return res.status(400).json({ error: "Text too short" });
+    if (trimmed.length > 12000) return res.status(400).json({ error: "Text too long" });
+
+    // Keep output predictable + reduce "helpful extra text"
+    const schemaHint =
+      "Return ONLY valid JSON with keys: " +
+      "likelihood, summary, red_flags, what_to_do, safe_next_steps. " +
+      "All values must be strings (bullets allowed as \\n- ...). " +
+      "Use likelihood exactly as one of: Low, Medium, High.";
 
     const system =
       "You help users assess whether a message might be a scam. " +
-      "You do NOT make definitive claims. You assess risk based on common scam patterns. " +
-      "Be calm, factual, and non-alarmist.";
+      "You do not make definitive claims. You assess risk based on common scam patterns. " +
+      "Be calm, factual, and non-alarmist. Do not add any text outside the JSON.";
 
     const user = `
-Return ONLY valid JSON with these keys:
-- likelihood (Low / Medium / High)
-- summary (1–2 sentences)
-- red_flags (bullet list as text, or 'None detected')
-- what_to_do (bullet list)
-- safe_next_steps (bullet list)
+${schemaHint}
+
+Tone: ${tone} (short = concise, detailed = more detail)
 
 Rules:
 - Do NOT invent facts.
 - If information is missing, say so.
 - This is a risk assessment, not a guarantee.
+- If the content appears benign, you may still mention basic safety steps.
 
 TEXT:
 """${trimmed}"""
@@ -62,7 +84,16 @@ TEXT:
     try {
       data = JSON.parse(raw);
     } catch {
-      return res.status(500).json({ error: "Invalid JSON from model", raw });
+      const cleaned = extractJson(raw);
+      try {
+        data = JSON.parse(cleaned);
+      } catch {
+        return res.status(500).json({
+          error: "Model did not return valid JSON",
+          raw,
+          cleaned
+        });
+      }
     }
 
     return res.status(200).json({ ok: true, data });
